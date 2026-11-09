@@ -1,0 +1,56 @@
+name: Setup Terragrunt
+description: Install OpenTofu and Terragrunt on a Linux runner and enable the provider plugin cache.
+
+inputs:
+  tofu-version:
+    description: OpenTofu version (e.g. 1.12.6)
+    required: true
+  tg-version:
+    description: Terragrunt version (e.g. 1.1.4)
+    required: true
+  lock-glob:
+    description: Files hashed into the provider cache key
+    required: false
+    default: "**/.terraform.lock.hcl"
+
+runs:
+  using: composite
+  steps:
+    - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+      with:
+        tofu_version: ${{ inputs.tofu-version }}
+        tofu_wrapper: false
+
+    - name: Cache OpenTofu providers
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ~/.terraform.d/plugin-cache
+        key: tofu-providers-${{ runner.os }}-${{ inputs.tofu-version }}-${{ hashFiles(inputs.lock-glob) }}
+        restore-keys: tofu-providers-${{ runner.os }}-${{ inputs.tofu-version }}-
+
+    - name: Enable provider plugin cache, pin Terragrunt to OpenTofu
+      shell: bash
+      run: |
+        mkdir -p ~/.terraform.d/plugin-cache
+        {
+          echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache"
+          echo "TG_TF_PATH=tofu"
+        } >>"$GITHUB_ENV"
+
+    - name: Install Terragrunt
+      shell: bash
+      env:
+        TG_VERSION: ${{ inputs.tg-version }}
+      run: |
+        case "$(uname -m)" in
+          x86_64)  arch=amd64 ;;
+          aarch64) arch=arm64 ;;
+          *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}"
+        tmp=$(mktemp -d)
+        curl -fsSLo "$tmp/terragrunt_linux_${arch}" "$base/terragrunt_linux_${arch}"
+        curl -fsSLo "$tmp/SHA256SUMS" "$base/SHA256SUMS"
+        (cd "$tmp" && grep " terragrunt_linux_${arch}\$" SHA256SUMS | sha256sum -c -)
+        install -m 755 "$tmp/terragrunt_linux_${arch}" /usr/local/bin/terragrunt
+        rm -rf "$tmp"

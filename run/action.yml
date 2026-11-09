@@ -1,0 +1,69 @@
+name: Terragrunt run (one unit)
+description: >
+  Runs `terragrunt plan` or `apply` in one unit, builds a change diagram for plans, and posts
+  (or updates, or removes) a comment on a pull request. Run setup and credentials steps first.
+
+inputs:
+  cmd:
+    description: plan or apply
+    required: false
+    default: plan
+  unit:
+    description: Unit directory (the one holding terragrunt.hcl)
+    required: true
+  pr-number:
+    description: Pull request to comment on; empty skips commenting
+    required: false
+    default: ""
+  diagram:
+    description: Build a Mermaid diagram of a plan's changes
+    required: false
+    default: "true"
+  github-token:
+    description: Token used to post the PR comment
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  outcome:
+    description: success or failure of the terragrunt run
+    value: ${{ steps.tg.outcome }}
+
+runs:
+  using: composite
+  steps:
+    - name: terragrunt ${{ inputs.cmd }}
+      id: tg
+      shell: bash
+      working-directory: ${{ inputs.unit }}
+      continue-on-error: true
+      env:
+        CMD: ${{ inputs.cmd }}
+      run: python3 ${{ github.action_path }}/../src/tg_run.py
+
+    - name: Diagram of changes
+      if: inputs.cmd == 'plan' && inputs.diagram == 'true' && steps.tg.outcome == 'success'
+      shell: bash
+      env:
+        UNIT: ${{ inputs.unit }}  # via env: the unit name comes from PR file paths
+      run: |
+        python3 ${{ github.action_path }}/../src/plan_all.py unit-diagram "$UNIT" > /tmp/diagram.md 2>/dev/null || : > /tmp/diagram.md
+
+    - name: Comment on PR
+      if: inputs.pr-number != ''
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      env:
+        UNIT: ${{ inputs.unit }}
+        OUTCOME: ${{ steps.tg.outcome }}
+        CMD: ${{ inputs.cmd }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SCRIPT: ${{ github.action_path }}/../src/plan-comment.js
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          await require(process.env.SCRIPT)({ github, context })
+
+    - name: Fail if errored
+      if: steps.tg.outcome == 'failure'
+      shell: bash
+      run: exit 1

@@ -1,0 +1,119 @@
+name: Terragrunt plan units
+
+# Reusable workflow: detects the Terragrunt units changed in a diff and plans each in a
+# matrix job, commenting the plan on a pull request. Call it from a pull_request workflow:
+#
+#   jobs:
+#     plan:
+#       uses: next-gen-infrastructure/terragrunt-actions/.github/workflows/plan-units.yml@v1
+#       with:
+#         base_ref: ${{ github.base_ref }}
+#         checkout_ref: ${{ github.event.pull_request.head.sha }}
+#         diff_spec: origin/${{ github.base_ref }}...HEAD
+#         pr_number: ${{ github.event.pull_request.number }}
+#         setup_script: .github/scripts/ci-setup.sh
+#       secrets: inherit
+#
+# Credentials are yours to set up: `setup_script` (a path in the caller's repo) runs before
+# Terragrunt with every secret available as JSON in $SECRETS_JSON (hence `secrets: inherit`).
+# Without it nothing but OpenTofu and Terragrunt is installed.
+
+on:
+  workflow_call:
+    inputs:
+      base_ref:
+        description: Branch that selects the environment (e.g. dev)
+        required: true
+        type: string
+      checkout_ref:
+        description: Git ref/sha to check out and plan
+        required: true
+        type: string
+      diff_spec:
+        description: "git diff args selecting changed files ('origin/dev...HEAD')"
+        required: true
+        type: string
+      pr_number:
+        description: Pull request to comment on; empty skips commenting
+        required: false
+        type: string
+        default: ""
+      root_dir:
+        description: Directory holding the <env>/ unit trees
+        required: false
+        type: string
+        default: terragrunt
+      env_map:
+        description: JSON map of base branch to environment name
+        required: false
+        type: string
+        default: '{"dev":"development","main":"production"}'
+      tofu_version:
+        required: true
+        type: string
+      tg_version:
+        required: true
+        type: string
+      setup_script:
+        description: Script in the caller's repo run before planning (credentials, VPN, ...)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tg-plan-${{ inputs.pr_number || inputs.checkout_ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.detect.outputs.env }}
+      units: ${{ steps.detect.outputs.units }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout_ref }}
+      - id: detect
+        uses: next-gen-infrastructure/terragrunt-actions/detect-units@v1
+        with:
+          base-ref: ${{ inputs.base_ref }}
+          diff-spec: ${{ inputs.diff_spec }}
+          root-dir: ${{ inputs.root_dir }}
+          env-map: ${{ inputs.env_map }}
+
+  plan:
+    needs: prepare
+    if: needs.prepare.outputs.units != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.units) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Caller setup
+        if: inputs.setup_script != ''
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          TG_ENV: ${{ needs.prepare.outputs.env }}
+          SETUP_SCRIPT: ${{ inputs.setup_script }}
+        run: bash "$SETUP_SCRIPT"
+
+      - uses: next-gen-infrastructure/terragrunt-actions/setup@v1
+        with:
+          tofu-version: ${{ inputs.tofu_version }}
+          tg-version: ${{ inputs.tg_version }}
+
+      - uses: next-gen-infrastructure/terragrunt-actions/run@v1
+        with:
+          cmd: plan
+          unit: ${{ matrix.unit }}
+          pr-number: ${{ inputs.pr_number }}

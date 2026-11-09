@@ -1,0 +1,45 @@
+name: Terragrunt plan --all
+description: >
+  Plans every unit under a directory, writes a per-unit step summary (plan as a diff block)
+  and a Mermaid dependency/change diagram, and reports whether anything changed.
+  Run setup and credentials steps first.
+
+inputs:
+  working-directory:
+    description: Environment unit tree to plan (e.g. terragrunt/development)
+    required: true
+
+outputs:
+  has_changes:
+    description: "'true' when at least one unit has changes"
+    value: ${{ steps.diagram.outputs.has_changes }}
+  diagram-path:
+    description: File holding the Markdown diagram
+    value: /tmp/diagram.md
+
+runs:
+  using: composite
+  steps:
+    - name: terragrunt plan --all
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # default shell has no pipefail: without it `| tee` hides a failed unit
+        set -o pipefail
+        rc=0
+        terragrunt plan --all --no-color --log-level error --tf-forward-stdout \
+          --non-interactive -lock=false -out=tf.plan \
+          | tee /tmp/plan-all.txt || rc=$?
+        # summary: per-unit plan from tf.plan; a failed run adds the raw tail (errors)
+        python3 "${{ github.action_path }}/../src/plan_all.py" summary
+        if [ "$rc" -ne 0 ]; then
+          { echo '### Errors'; echo; echo '```text'; tail -n 80 /tmp/plan-all.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$rc"
+
+    - name: Diagram of changes
+      id: diagram
+      if: success() || failure()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: python3 ${{ github.action_path }}/../src/plan_all.py diagram

@@ -1,0 +1,25 @@
+name: Release
+
+# Publishing a release vX.Y.Z moves the floating major tag vX to it, so consumers
+# can follow `@vX`. Create the release (and its vX.Y.Z tag) from the GitHub UI or `gh release create`.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  major-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Move major tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          [[ "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]] || { echo "not a vX.Y.Z tag: $TAG" >&2; exit 1; }
+          major="v${BASH_REMATCH[1]}"
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/$major"

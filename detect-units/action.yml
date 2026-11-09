@@ -1,0 +1,40 @@
+name: Detect Terragrunt units
+description: >
+  Picks the environment from a base branch and the changed Terragrunt units from a git diff.
+  Run actions/checkout with fetch-depth 0 first.
+
+inputs:
+  base-ref:
+    description: Branch that selects the environment (e.g. dev)
+    required: true
+  diff-spec:
+    description: "git diff args selecting changed files ('origin/dev...HEAD' or '<before> <after>')"
+    required: true
+  root-dir:
+    description: Directory holding the <env>/ unit trees
+    required: false
+    default: terragrunt
+  env-map:
+    description: JSON map of base branch to environment name
+    required: false
+    default: '{"dev":"development","main":"production"}'
+
+outputs:
+  env:
+    description: Environment name picked from env-map
+    value: ${{ steps.detect.outputs.env }}
+  units:
+    description: 'Matrix JSON, {"unit":["<dir>", ...]}, or [] when no unit changed'
+    value: ${{ steps.detect.outputs.units }}
+
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        DIFF_SPEC: ${{ inputs.diff-spec }}
+        ROOT_DIR: ${{ inputs.root-dir }}
+        ENV_MAP: ${{ inputs.env-map }}
+      run: python3 ${{ github.action_path }}/../src/detect_units.py

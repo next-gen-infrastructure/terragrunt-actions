@@ -1,0 +1,28 @@
+name: Terragrunt apply --all
+description: >
+  Applies every unit under a directory and writes a trimmed step summary (progress, results,
+  errors). Run setup and credentials steps first. Gate this behind your own approval.
+
+inputs:
+  working-directory:
+    description: Environment unit tree to apply (e.g. terragrunt/development)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: terragrunt apply --all
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # default shell has no pipefail: without it `| tee` hides a failed unit
+        set -o pipefail
+        rc=0
+        terragrunt apply --all --no-color --log-level error --tf-forward-stdout \
+          --non-interactive -auto-approve \
+          | tee /tmp/apply-all.txt || rc=$?
+        # summary: progress, results and errors only; the plan was reviewed before approval
+        { echo '```text'
+          grep -E ': (Creating|Modifying|Destroying|Replacing)\.\.\.|(Creation|Modifications|Destruction) complete|^Apply complete|^Error|^[╷│╵]|^❯❯|^ +(Succeeded|Failed|Excluded|Early exits)' /tmp/apply-all.txt || true
+          echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        exit "$rc"
