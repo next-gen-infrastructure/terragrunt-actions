@@ -14,7 +14,7 @@ specific cloud, secret store or approval process.
 | [`detect-units`](detect-units/action.yml) | Environment from a base branch + the changed units as a matrix |
 | [`run`](run/action.yml) | `plan`/`apply` in one unit, diagram, PR comment |
 | [`plan-all`](plan-all/action.yml) | `plan --all`, per-unit step summary, dependency + change diagram, `has_changes` output |
-| [`apply-all`](apply-all/action.yml) | `apply --all` with a trimmed step summary |
+| [`apply-all`](apply-all/action.yml) | `apply --all` with a step summary: unit table with durations, output of applied units, errors of failed ones, with `summary-path` / `report-path` / `log-path` outputs |
 
 A [reusable workflow](.github/workflows/plan-units.yml) wires `detect-units`, `setup` and `run` into a
 per-unit PR plan matrix.

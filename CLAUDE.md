@@ -12,7 +12,7 @@ PYTHONPATH=src python3 -m unittest tests.test_scripts.PlanDiff.test_render   # o
 pre-commit run --all-files                                   # check-yaml, actionlint, ruff, unittest
 ```
 
-Python code is stdlib-only and needs 3.10+ (`X | None`, `:=`); runners have 3.12. There is no build step.
+Python code is stdlib-only and needs 3.11+ (`X | None`, `:=`, `fromisoformat` with `Z`); runners have 3.12. There is no build step.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ Python code is stdlib-only and needs 3.10+ (`X | None`, `:=`); runners have 3.12
 - Data flow of a plan: `tg_run.py` runs `terragrunt plan -out=tf.plan` and writes `/tmp/raw.txt` + `/tmp/out.txt`; `plan_all.py unit-diagram` writes `/tmp/diagram.md`; `plan-comment.js` reads both files. `plan_all.py diagram` also writes `/tmp/diagram.md` for the `plan-all` action output.
 - **Plans are read with `tofu show`/`tofu graph` run inside terragrunt's `.terragrunt-cache/**/tf.plan` dir, never via another `terragrunt` call.** Units pinned to a branch (`?ref=main`) are re-downloaded on every terragrunt call, which wipes `tf.plan`. Keep it that way.
 - `plan_all.py` maps units to plans by the path prefix before `.terragrunt-cache`; `plan_graph.render` and `dag_graph.render` are pure functions returning Mermaid; `plan_diff.render` turns `tofu show` text into a ```diff block (markers moved to column 0, `helm_release` `metadata.values` dropped).
-- `plan-all` and `apply-all` keep their `terragrunt ... | tee` and `grep` steps as inline shell in the YAML (needs `set -o pipefail`).
+- `plan-all` and `apply-all` keep their `terragrunt ... | tee` step as inline shell in the YAML (needs `set -o pipefail`). `apply-all` runs without `--log-level error`/`--tf-forward-stdout` on purpose: terragrunt's log prefixes every tofu line with its `[unit]`, which `apply_all.py` groups, next to the `--report-file` JSON (needs terragrunt >= 1.1.4; verified on 1.1.4 and 1.2.1). The summary, report and log paths are action outputs so callers can reuse them (e.g. to notify Slack, which stays in the caller, not here).
 - `.github/workflows/plan-units.yml` is the reusable per-unit PR plan workflow; it refs `terragrunt-actions/<x>@v1`, so it cannot run until a `v1` tag exists. `release.yml` moves the floating `vN` tag when a `vX.Y.Z` release is published.
 - Third-party actions are pinned by SHA with a `# vN` comment (Renovate maintains them). Linux runners only.
 

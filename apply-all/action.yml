@@ -1,12 +1,24 @@
 name: Terragrunt apply --all
 description: >
-  Applies every unit under a directory and writes a trimmed step summary (progress, results,
-  errors). Run setup and credentials steps first. Gate this behind your own approval.
+  Applies every unit under a directory and writes a step summary: a table of the units that
+  changed or failed, the output of each applied unit and the error of each failed one.
+  Run setup and credentials steps first. Gate this behind your own approval.
 
 inputs:
   working-directory:
     description: Environment unit tree to apply (e.g. terragrunt/development)
     required: true
+
+outputs:
+  summary-path:
+    description: File holding the Markdown summary (also appended to the step summary)
+    value: /tmp/apply-summary.md
+  report-path:
+    description: Terragrunt run report (JSON array with Name, Result, Reason, Cause, Started, Ended per unit)
+    value: /tmp/apply-report.json
+  log-path:
+    description: Terragrunt log of the apply, each tofu line prefixed with its unit
+    value: /tmp/apply-all.txt
 
 runs:
   using: composite
@@ -15,14 +27,13 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # default shell has no pipefail: without it `| tee` hides a failed unit
+        # default shell has no pipefail: without it `| tee` hides a failed unit.
+        # No --log-level error / --tf-forward-stdout: terragrunt's log prefixes each tofu line
+        # with its unit, which the summary needs; 2>&1 keeps both streams in the log.
         set -o pipefail
         rc=0
-        terragrunt apply --all --no-color --log-level error --tf-forward-stdout \
-          --non-interactive -auto-approve \
-          | tee /tmp/apply-all.txt || rc=$?
-        # summary: progress, results and errors only; the plan was reviewed before approval
-        { echo '```text'
-          grep -E ': (Creating|Modifying|Destroying|Replacing)\.\.\.|(Creation|Modifications|Destruction) complete|^Apply complete|^Error|^[╷│╵]|^❯❯|^ +(Succeeded|Failed|Excluded|Early exits)' /tmp/apply-all.txt || true
-          echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        terragrunt apply --all --no-color --non-interactive -auto-approve \
+          --report-file /tmp/apply-report.json --report-format json --summary-per-unit \
+          2>&1 | tee /tmp/apply-all.txt || rc=$?
+        python3 "${{ github.action_path }}/../src/apply_all.py" /tmp/apply-all.txt /tmp/apply-report.json
         exit "$rc"
